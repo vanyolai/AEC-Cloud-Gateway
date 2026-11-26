@@ -15,7 +15,7 @@ from .errors import AECError
 
 # Fixed field names only: arbitrary API keys and values may contain identifiers.
 KNOWN_FIELDS = (
-    "result", "data", "popupData", "deviceDetail", "deviceDetailInfoVo",
+    "result", "obj", "data", "popupData", "deviceDetail", "deviceDetailInfoVo",
     "deviceInfoMap", "detailInfoMap", "displayMap", "chartMap", "key", "unit",
 )
 

@@ -1,0 +1,102 @@
+{
+  "get_plants": {
+    "result": 0,
+    "msg": "Request successfully.",
+    "obj": [
+      {
+        "id": 101,
+        "plantName": "Example plant",
+        "deviceSnList": null
+      }
+    ],
+    "data": null,
+    "taskResult": null
+  },
+  "get_home_control_sn": {
+    "result": 0,
+    "msg": "Request successfully.",
+    "obj": [
+      {
+        "id": 202,
+        "plantId": 101,
+        "deviceSn": "EXAMPLE-INVERTER",
+        "datalogSn": "EXAMPLE-LOGGER",
+        "deviceType": 60594
+      }
+    ],
+    "data": null,
+    "taskResult": null
+  },
+  "get_home_count_data": {
+    "result": 0,
+    "obj": {
+      "onlineStatus": 1,
+      "solarPower": "120W",
+      "gridPower": "0W",
+      "loadPower": "100W",
+      "batPower": "20W",
+      "batWorkMode": -1,
+      "batSoc": "42%",
+      "batRemainingEnergy": "--",
+      "batTotalCapacity": "--",
+      "todayEnergy": "1.2kWh",
+      "popupData": {
+        "batInfo": {
+          "batSOC": "42%",
+          "batVoltage": "51.5V",
+          "batCurrent": "0.4A",
+          "batPower": "20W"
+        },
+        "loadInfo": {
+          "outputVoltage": "230V",
+          "outputFrequency": "50Hz"
+        },
+        "pvInfo": {
+          "pv1Power": "120W",
+          "pv2Power": "0W"
+        }
+      }
+    },
+    "data": null,
+    "taskResult": null
+  },
+  "get_device_by_sn": {
+    "result": 0,
+    "obj": {
+      "deviceDetail": null,
+      "deviceDetailInfoVo": {
+        "soc": 0
+      },
+      "deviceInfoMap": {
+        "Battery Information": {
+          "Battery Capacity Percentage": "42.0%"
+        },
+        "Temperature Information": {
+          "INV Temperature": "21.0℃"
+        }
+      },
+      "displayMap": {
+        "Battery Capacity Percentage": "42.0%",
+        "Energy Terminal-Battery Status": "Battery Discharging",
+        "Cumulative Load Power Consumption": "12.5kWh",
+        "Device Model": "SP100-12000-48"
+      },
+      "chartMap": {
+        "Battery Charge/Discharge Power": {
+          "00:00": 0,
+          "00:05": null,
+          "00:10": 20,
+          "00:15": -30
+        },
+        "key": [
+          "Battery Charge/Discharge Power"
+        ],
+        "unit": {
+          "Battery Charge/Discharge Power": "W"
+        }
+      }
+    },
+    "data": null,
+    "taskResult": null
+  }
+}
