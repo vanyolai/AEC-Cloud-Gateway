@@ -1,0 +1,10 @@
+{
+  "result": 0,
+  "data": {
+    "deviceDetail": null,
+    "deviceDetailInfoVo": {"batPackCount": 1, "soc": 0, "batRemainingCapacity": "0kWh", "dataObj": null},
+    "deviceInfoMap": {"Basic Information": {"Device Model": "SP100-12000-48", "Serial Number": "EXAMPLE-INVERTER"}},
+    "displayMap": {},
+    "chartMap": {"key": [], "unit": []}
+  }
+}
