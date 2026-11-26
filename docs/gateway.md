@@ -33,16 +33,15 @@ All topics are under MQTT_TOPIC_PREFIX. Each message is retained at QoS 1.
 
 Consumers must require both gateway and corresponding source availability,
 and reject stale fetched_at timestamps using their own freshness threshold.
-This timestamp is the UTC time of local fetch/publication, not inverter sample
+This timestamp is the UTC time immediately after the local fetch, not inverter sample
 time. Retained state is intentionally not replaced by zero on a failure.
 The two payloads are separately sampled. Null fields remain JSON null.
-The gateway marks source availability offline on reconnect before resuming
-polls. A failure backs off per source; detail polling is suspended if the
+The gateway marks source availability offline on reconnect before publishing new state. A failure backs off per source; detail polling is suspended if the
 summary fails or the inverter is offline. Authentication errors and exhausted
 rate-limit errors suspend polling until a manual restart, to avoid hammering
-the undocumented API. MQTT outage pauses cloud polling. There are no MQTT
+the undocumented API. MQTT and PostgreSQL outputs are independently optional; neither gates cloud polling. An output outage can lose samples for that output; there is no durable retry spool yet. There are no MQTT
 subscriptions or control commands.
 
-See deploy/compose.yaml and deploy/gateway.env.example. The initial published
+See deploy/compose.yaml and deploy/gateway.env.example. Copy the example to a private .env beside the Compose file; Dockge can manage it directly. See [PostgreSQL storage](storage.md) for optional storage. The initial published
 image targets linux/amd64. CI builds the image; broker and live deployment
 must still be validated separately.

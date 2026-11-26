@@ -4,7 +4,7 @@ Unofficial, self-hosted integration for AEC Cloud inverter telemetry. The first
 milestone is a standalone Python client, with no MQTT or Home Assistant dependency.
 This is an independent project, not a Sunpura fork or a vendor-supported SDK.
 
-**Status:** 0.3.0 development baseline. The endpoints were tested manually on
+**Status:** 0.4.0 development baseline. The endpoints were tested manually on
 2026-11-26 against an SP100-12000-48 inverter. This implementation has offline
 unit tests; the client has now been exercised successfully against a live SP100-12000-48 account.
 
@@ -74,8 +74,9 @@ subsets of observed structures, not exact sanitized captures.
 2. Normalized telemetry model after validation of fields, units and signs.
 3. Docker service and MQTT publication to an existing broker. Configurable
    summary polling (60 seconds) and detail polling (300 seconds).
-4. Home Assistant MQTT Discovery, stable identities and availability handling.
-5. Native MyHome integration, independently of Home Assistant.
+4. Optional PostgreSQL snapshot storage and independent MQTT output.
+5. Home Assistant MQTT Discovery, stable identities and availability handling.
+6. Historical backfill and REST export. MyHome consumes MQTT via a separate gateway.
 
 No control features are planned in the initial milestones. Do not enable
 unattended polling until the vendor's applicable terms and rate limits have
@@ -103,3 +104,5 @@ private capture replay and remaining validation limitations.
 
 See [gateway documentation](docs/gateway.md) and the [Compose example](deploy/compose.yaml).
 Continuous polling is disabled until explicitly enabled after provider terms review.
+
+See [PostgreSQL storage](docs/storage.md) for optional local history and external or bundled database configuration.

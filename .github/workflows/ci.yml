@@ -21,3 +21,27 @@ jobs:
       - run: python -m pip install '.[dev]'
       - run: python -m pytest
       - run: python -m build
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: aec_test
+          POSTGRES_USER: aec_test
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aec_test -d aec_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install '.[dev]'
+      - run: python -m pytest tests/test_storage.py
+        env:
+          AEC_TEST_POSTGRES: 'true'

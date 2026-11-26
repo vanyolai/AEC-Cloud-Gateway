@@ -10,7 +10,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import paho.mqtt.client as mqtt
 
@@ -18,6 +18,7 @@ from .client import AECClient
 from .discovery import discover, select_inverter
 from .errors import AECError, AuthenticationError, RateLimitError
 from .telemetry import normalize_summary, normalize_details
+from .storage import DatabaseConfig, PostgresStorage
 
 LOG = logging.getLogger("aec-gateway")
 
@@ -55,14 +56,22 @@ class Config:
     tz: ZoneInfo
     plant_id: str | None = field(repr=False)
     inverter_sn: str | None = field(repr=False)
+    mqtt_enabled: bool = True
+    database: DatabaseConfig | None = field(default=None, repr=False)
 
     @classmethod
     def from_env(cls, env):
         if not flag(env, "AEC_POLL_ENABLED"):
             raise ValueError("Polling disabled; review provider terms and set AEC_POLL_ENABLED=true")
-        if not all(env.get(k) for k in ("AEC_EMAIL", "AEC_PASSWORD", "MQTT_HOST")):
-            raise ValueError("AEC_EMAIL, AEC_PASSWORD and MQTT_HOST are required")
-        if bool(env.get("MQTT_USERNAME")) != bool(env.get("MQTT_PASSWORD")):
+        mqtt_enabled = flag(env, "MQTT_ENABLED", "true")
+        database = DatabaseConfig.from_env(env) if flag(env, "DB_ENABLED") else None
+        if not mqtt_enabled and database is None:
+            raise ValueError("Enable at least one output")
+        if not all(env.get(k) for k in ("AEC_EMAIL", "AEC_PASSWORD")):
+            raise ValueError("AEC_EMAIL and AEC_PASSWORD are required")
+        if mqtt_enabled and not env.get("MQTT_HOST"):
+            raise ValueError("MQTT_HOST is required")
+        if mqtt_enabled and bool(env.get("MQTT_USERNAME")) != bool(env.get("MQTT_PASSWORD")):
             raise ValueError("Configure both MQTT_USERNAME and MQTT_PASSWORD, or neither")
         prefix = env.get("MQTT_TOPIC_PREFIX", "aec/inverter")
         if not re.fullmatch(r"[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*", prefix):
@@ -71,14 +80,15 @@ class Config:
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", cid):
             raise ValueError("Invalid MQTT_CLIENT_ID")
         tls = flag(env, "MQTT_TLS")
-        return cls(env["AEC_EMAIL"], env["AEC_PASSWORD"], env["MQTT_HOST"],
+        return cls(env["AEC_EMAIL"], env["AEC_PASSWORD"], env.get("MQTT_HOST", ""),
                    integer(env, "MQTT_PORT", 8883 if tls else 1883, 1, 65535),
                    env.get("MQTT_USERNAME", ""), env.get("MQTT_PASSWORD", ""),
                    prefix, cid, tls,
                    integer(env, "AEC_SUMMARY_INTERVAL", 60, 60, 86400),
                    integer(env, "AEC_DETAIL_INTERVAL", 300, 300, 86400),
                    ZoneInfo(env.get("AEC_TIMEZONE", "UTC")),
-                   env.get("AEC_PLANT_ID") or None, env.get("AEC_INVERTER_SN") or None)
+                   env.get("AEC_PLANT_ID") or None, env.get("AEC_INVERTER_SN") or None,
+                   mqtt_enabled, database)
 
 
 class BrokerError(Exception):
@@ -101,6 +111,7 @@ class Broker:
         self.client.will_set(self.topic("availability"), "offline", qos=1, retain=True)
         self.client.on_connect = self.on_connect
         self.client.on_disconnect = self.on_disconnect
+        self.client.on_connect_fail = lambda *_: LOG.warning("MQTT transport connection failed")
         self.host, self.port = config.host, config.port
 
     def topic(self, suffix):
@@ -109,7 +120,7 @@ class Broker:
     def on_connect(self, client, userdata, flags, reason_code, properties):
         if reason_code.is_failure:
             self.connected.clear()
-            LOG.warning("MQTT connection rejected")
+            LOG.warning("MQTT connection rejected: %s", reason_code)
             return
         self.generation += 1
         self.connected.set()
@@ -165,13 +176,13 @@ class Schedule:
             self.due = now + delay
 
 
-def encode_state(values):
-    return json.dumps({"schema": 1, "fetched_at": datetime.now(timezone.utc).isoformat(),
+def encode_state(values, fetched_at=None):
+    return json.dumps({"schema": 1, "fetched_at": (fetched_at or datetime.now(timezone.utc)).isoformat(),
                        **values}, allow_nan=False, separators=(",", ":"))
 
 
-def publish_source(broker, source, values, generation):
-    broker.publish(source + "/state", encode_state(values), generation)
+def publish_source(broker, source, values, generation, fetched_at=None):
+    broker.publish(source + "/state", encode_state(values, fetched_at), generation)
     broker.publish(source + "/availability", "online", generation)
 
 
@@ -181,95 +192,127 @@ def poll_source(client, device, source, tz):
     return normalize_details(client.get_device_by_sn(device.serial, datetime.now(tz).date()))
 
 
+class MQTTOutput:
+    def __init__(self, broker):
+        self.broker = broker
+        self.generation = 0
+
+    def sync(self):
+        if not self.broker.connected.is_set():
+            self.generation = 0
+            return False
+        current = self.broker.generation
+        if current != self.generation:
+            self.broker.publish("availability", "offline", current)
+            for source in ("summary", "detail"):
+                self.broker.publish(source + "/availability", "offline", current)
+            self.broker.publish("availability", "online", current)
+            self.generation = current
+        return True
+
+    def emit(self, device, source, values, fetched_at):
+        if self.sync():
+            publish_source(self.broker, source, values, self.generation, fetched_at)
+            LOG.info("%s published", source)
+
+    def offline(self, sources):
+        if self.sync():
+            for source in sources:
+                self.broker.publish(source + "/availability", "offline", self.generation)
+
+    def attempt(self, action, *args):
+        try:
+            getattr(self, action)(*args)
+        except BrokerError:
+            self.generation = 0
+            LOG.warning("MQTT publish interrupted")
+
+
+def emit_sample(outputs, device, source, values, fetched_at):
+    for output in outputs:
+        output.attempt("emit", device, source, values, fetched_at)
+
+
 def run(config, stop):
-    broker = Broker(config)
-    broker.start()
-    generation = 0
+    broker = Broker(config) if config.mqtt_enabled else None
+    mqtt_output = MQTTOutput(broker) if broker else None
+    database = PostgresStorage(config.database) if config.database else None
+    outputs = [output for output in (database, mqtt_output) if output is not None]
     schedules = {"summary": Schedule(config.summary_interval),
                  "detail": Schedule(config.detail_interval)}
     discovery = Schedule(300)
     device = None
     summary_ok = False
     halted = False
+    if broker:
+        broker.start()
     try:
         with AECClient(config.email, config.password, timeout=10, max_retries=1) as client:
             while not stop.is_set():
-                if not broker.connected.is_set():
+                if mqtt_output:
+                    mqtt_output.attempt("sync")
+                if halted:
                     stop.wait(1)
                     continue
-                try:
-                    if generation != broker.generation:
-                        current = broker.generation
-                        broker.publish("availability", "offline", current)
-                        for source in schedules:
-                            broker.publish(source + "/availability", "offline", current)
-                        broker.publish("availability", "online", current)
-                        generation = current
+                if device is None and time.monotonic() >= discovery.due:
+                    try:
+                        device = select_inverter(discover(client, config.plant_id), config.inverter_sn)
+                        discovery.complete(time.monotonic(), True)
+                        LOG.info("AEC device selected")
+                    except (AuthenticationError, RateLimitError):
+                        halted = True
+                        LOG.error("AEC authentication or rate limit; polling suspended until restart")
+                    except AECError as exc:
+                        discovery.complete(time.monotonic(), False)
+                        LOG.warning("Discovery failed: %s", type(exc).__name__)
+                if device is None:
+                    stop.wait(1)
+                    continue
+                for source, schedule in schedules.items():
+                    if stop.is_set() or halted:
+                        break
+                    if time.monotonic() < schedule.due or (source == "detail" and not summary_ok):
+                        continue
+                    try:
+                        values = poll_source(client, device, source, config.tz)
+                        fetched_at = datetime.now(timezone.utc)
+                        schedule.complete(time.monotonic(), True)
+                        if source == "summary":
+                            summary_ok = values.get("online") is True
+                            if not summary_ok:
+                                if mqtt_output:
+                                    mqtt_output.attempt("offline", ("summary", "detail"))
+                                schedule.complete(time.monotonic(), False)
+                                continue
+                        emit_sample(outputs, device, source, values, fetched_at)
+                    except (AuthenticationError, RateLimitError):
+                        halted = True
                         summary_ok = False
-                    if halted:
-                        stop.wait(1)
-                        continue
-                    now = time.monotonic()
-                    if device is None and now >= discovery.due:
-                        try:
-                            device = select_inverter(discover(client, config.plant_id), config.inverter_sn)
-                            discovery.complete(time.monotonic(), True)
-                            LOG.info("AEC device selected")
-                        except (AuthenticationError, RateLimitError):
-                            halted = True
-                            LOG.error("AEC authentication or rate limit; polling suspended until restart")
-                        except AECError as exc:
-                            discovery.complete(time.monotonic(), False)
-                            LOG.warning("Discovery failed: %s", type(exc).__name__)
-                    if device is None:
-                        stop.wait(1)
-                        continue
-                    for source, schedule in schedules.items():
-                        if stop.is_set() or halted or not broker.connected.is_set():
-                            break
-                        if time.monotonic() < schedule.due or (source == "detail" and not summary_ok):
-                            continue
-                        try:
-                            values = poll_source(client, device, source, config.tz)
-                            schedule.complete(time.monotonic(), True)
-                            if source == "summary":
-                                summary_ok = values.get("online") is True
-                                if not summary_ok:
-                                    broker.publish("summary/availability", "offline", generation)
-                                    broker.publish("detail/availability", "offline", generation)
-                                    schedule.complete(time.monotonic(), False)
-                                    continue
-                            publish_source(broker, source, values, generation)
-                            LOG.info("%s published", source)
-                        except (AuthenticationError, RateLimitError):
-                            halted = True
+                        if mqtt_output:
+                            mqtt_output.attempt("offline", tuple(schedules))
+                        LOG.error("AEC authentication or rate limit; polling suspended until restart")
+                    except AECError as exc:
+                        schedule.complete(time.monotonic(), False)
+                        if source == "summary":
                             summary_ok = False
-                            for key in schedules:
-                                broker.publish(key + "/availability", "offline", generation)
-                            LOG.error("AEC authentication or rate limit; polling suspended until restart")
-                        except AECError as exc:
-                            schedule.complete(time.monotonic(), False)
-                            if source == "summary":
-                                summary_ok = False
-                            broker.publish(source + "/availability", "offline", generation)
-                            if source == "summary":
-                                broker.publish("detail/availability", "offline", generation)
-                            LOG.warning("%s failed: %s", source, type(exc).__name__)
-                except BrokerError:
-                    # Reset retained source availability before the next successful publish.
-                    generation = 0
-                    summary_ok = False
-                    LOG.warning("MQTT publish interrupted")
+                        if mqtt_output:
+                            mqtt_output.attempt("offline", ("summary", "detail") if source == "summary" else (source,))
+                        LOG.warning("%s failed: %s", source, type(exc).__name__)
                 stop.wait(1)
     finally:
-        broker.stop()
+        try:
+            if database:
+                database.close()
+        finally:
+            if broker:
+                broker.stop()
 
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
         config = Config.from_env(os.environ)
-    except (ValueError, KeyError) as exc:
+    except (ValueError, KeyError, ZoneInfoNotFoundError) as exc:
         LOG.error("Configuration error: %s", str(exc))
         return 2
     stop = threading.Event()
