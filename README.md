@@ -4,7 +4,7 @@ Unofficial, self-hosted integration for AEC Cloud inverter telemetry. The first
 milestone is a standalone Python client, with no MQTT or Home Assistant dependency.
 This is an independent project, not a Sunpura fork or a vendor-supported SDK.
 
-**Status:** 0.1.0 development baseline. The endpoints were tested manually on
+**Status:** 0.1.1 development baseline. The endpoints were tested manually on
 2026-11-26 against an SP100-12000-48 inverter. This implementation has offline
 unit tests; it has not yet been exercised against a live account.
 
@@ -88,3 +88,8 @@ Run `python -m pytest` and `python -m build`. CI runs these on Linux for Python
 3.11–3.14, without real credentials or live network requests in the tests.
 
 License selection is pending; no third-party source code has been copied.
+
+## Live smoke test
+
+See [live diagnostics](docs/diagnostics.md) for the one-shot interactive test
+and private capture workflow. Live validation is still pending.
