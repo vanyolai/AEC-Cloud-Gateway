@@ -1,0 +1,22 @@
+services:
+  aec-gateway:
+    image: ghcr.io/vanyolai/aec-cloud-gateway:0.3.0
+    container_name: aec-gateway
+    user: "1000:1000"
+    env_file:
+      - /mnt/applications/appdata/aec-gateway/gateway.env
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 2m
+    networks:
+      - cloud
+
+networks:
+  cloud:
+    external: true

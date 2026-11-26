@@ -4,7 +4,7 @@ Unofficial, self-hosted integration for AEC Cloud inverter telemetry. The first
 milestone is a standalone Python client, with no MQTT or Home Assistant dependency.
 This is an independent project, not a Sunpura fork or a vendor-supported SDK.
 
-**Status:** 0.2.0 development baseline. The endpoints were tested manually on
+**Status:** 0.3.0 development baseline. The endpoints were tested manually on
 2026-11-26 against an SP100-12000-48 inverter. This implementation has offline
 unit tests; the client has now been exercised successfully against a live SP100-12000-48 account.
 
@@ -98,3 +98,8 @@ and private capture workflow. The four read endpoints were validated successfull
 
 See [telemetry](docs/telemetry.md) for automated discovery, normalized fields,
 private capture replay and remaining validation limitations.
+
+## Experimental Docker MQTT gateway
+
+See [gateway documentation](docs/gateway.md) and the [Compose example](deploy/compose.yaml).
+Continuous polling is disabled until explicitly enabled after provider terms review.
