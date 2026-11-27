@@ -78,6 +78,11 @@ class PostgresStorage:
         self.retry_at = 0.0
         self.failures = 0
         self.cleanup_at = 0.0
+        self.stored = 0
+        self.write_errors = 0
+        self.skipped = 0
+        self.cleanup_errors = 0
+        self.last_success_at = None
 
     def connect(self):
         if self.conn is None or self.conn.closed:
@@ -100,20 +105,28 @@ class PostgresStorage:
             VALUES (%s, %s, %s, %s, 1, %s)
             ON CONFLICT (plant_id, inverter_sn, source, fetched_at) DO NOTHING
         """, (device.plant_id, device.serial, source, fetched_at, self.jsonb(values)))
+        self.stored += 1
+        self.last_success_at = fetched_at.isoformat()
         LOG.info("%s stored in PostgreSQL", source)
         if self.config.retention_days and time.monotonic() >= self.cleanup_at:
-            self.conn.execute("""
+            try:
+                self.conn.execute("""
                 DELETE FROM aec_snapshots WHERE ctid IN (
                     SELECT ctid FROM aec_snapshots
                     WHERE plant_id = %s AND inverter_sn = %s
                     AND fetched_at < now() - (%s * interval '1 day')
                     LIMIT 10000
                 )
-            """, (device.plant_id, device.serial, self.config.retention_days))
+                """, (device.plant_id, device.serial, self.config.retention_days))
+            except self.driver.Error as exc:
+                self.cleanup_errors += 1
+                LOG.warning("PostgreSQL retention failed: %s", type(exc).__name__)
+                self.close()
             self.cleanup_at = time.monotonic() + 3600
 
     def attempt(self, action, *args):
         if time.monotonic() < self.retry_at:
+            self.skipped += 1
             LOG.warning("PostgreSQL backoff; snapshot not stored")
             return
         try:
@@ -121,11 +134,19 @@ class PostgresStorage:
         except (self.driver.Error, ValueError) as exc:
             self.close()
             self.failures += 1
+            self.write_errors += 1
             self.retry_at = time.monotonic() + min(300, 5 * 2 ** min(self.failures - 1, 6))
             LOG.warning("PostgreSQL output failed: %s; snapshot may not be stored", type(exc).__name__)
         else:
             self.failures = 0
             self.retry_at = 0.0
+
+    def health(self, now):
+        return {"enabled": True, "connected": self.conn is not None and not self.conn.closed,
+                "stored": self.stored, "write_errors": self.write_errors,
+                "skipped": self.skipped, "cleanup_errors": self.cleanup_errors,
+                "last_success_at": self.last_success_at,
+                "retry_in_seconds": round(max(0, self.retry_at - now), 1)}
 
     def close(self):
         if self.conn is not None:

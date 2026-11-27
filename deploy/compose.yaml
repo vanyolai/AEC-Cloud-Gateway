@@ -1,6 +1,6 @@
 services:
   aec-gateway:
-    image: ghcr.io/vanyolai/aec-cloud-gateway:0.4.0
+    image: ghcr.io/vanyolai/aec-cloud-gateway:0.4.1
     container_name: aec-gateway
     user: "1000:1000"
     env_file:

@@ -19,6 +19,7 @@ from .discovery import discover, select_inverter
 from .errors import AECError, AuthenticationError, RateLimitError
 from .telemetry import normalize_summary, normalize_details
 from .storage import DatabaseConfig, PostgresStorage
+from .health import Health, safe_error
 
 LOG = logging.getLogger("aec-gateway")
 
@@ -58,6 +59,7 @@ class Config:
     inverter_sn: str | None = field(repr=False)
     mqtt_enabled: bool = True
     database: DatabaseConfig | None = field(default=None, repr=False)
+    diagnostics_interval: int = 60
 
     @classmethod
     def from_env(cls, env):
@@ -88,7 +90,8 @@ class Config:
                    integer(env, "AEC_DETAIL_INTERVAL", 300, 300, 86400),
                    ZoneInfo(env.get("AEC_TIMEZONE", "UTC")),
                    env.get("AEC_PLANT_ID") or None, env.get("AEC_INVERTER_SN") or None,
-                   mqtt_enabled, database)
+                   mqtt_enabled, database,
+                   integer(env, "AEC_DIAGNOSTICS_INTERVAL", 60, 0, 86400))
 
 
 class BrokerError(Exception):
@@ -100,6 +103,7 @@ class Broker:
         self.prefix = config.prefix
         self.connected = threading.Event()
         self.generation = 0
+        self.connection_errors = 0
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=config.client_id,
                                   protocol=mqtt.MQTTv311, clean_session=True)
         if config.username:
@@ -111,7 +115,7 @@ class Broker:
         self.client.will_set(self.topic("availability"), "offline", qos=1, retain=True)
         self.client.on_connect = self.on_connect
         self.client.on_disconnect = self.on_disconnect
-        self.client.on_connect_fail = lambda *_: LOG.warning("MQTT transport connection failed")
+        self.client.on_connect_fail = self.on_connect_fail
         self.host, self.port = config.host, config.port
 
     def topic(self, suffix):
@@ -120,10 +124,15 @@ class Broker:
     def on_connect(self, client, userdata, flags, reason_code, properties):
         if reason_code.is_failure:
             self.connected.clear()
+            self.connection_errors += 1
             LOG.warning("MQTT connection rejected: %s", reason_code)
             return
         self.generation += 1
         self.connected.set()
+
+    def on_connect_fail(self, client, userdata):
+        self.connection_errors += 1
+        LOG.warning("MQTT transport connection failed")
 
     def on_disconnect(self, client, userdata, flags, reason_code, properties):
         self.connected.clear()
@@ -196,6 +205,11 @@ class MQTTOutput:
     def __init__(self, broker):
         self.broker = broker
         self.generation = 0
+        self.published = 0
+        self.skipped = 0
+        self.publish_errors = 0
+        self.diagnostic_errors = 0
+        self.last_success_at = None
 
     def sync(self):
         if not self.broker.connected.is_set():
@@ -213,7 +227,31 @@ class MQTTOutput:
     def emit(self, device, source, values, fetched_at):
         if self.sync():
             publish_source(self.broker, source, values, self.generation, fetched_at)
+            self.published += 1
+            self.last_success_at = fetched_at.isoformat()
             LOG.info("%s published", source)
+        else:
+            self.skipped += 1
+
+    def health(self):
+        return {"enabled": True, "connected": self.broker.connected.is_set(),
+                "connections": self.broker.generation,
+                "connection_errors": self.broker.connection_errors,
+                "published": self.published, "skipped": self.skipped,
+                "publish_errors": self.publish_errors,
+                "diagnostic_errors": self.diagnostic_errors,
+                "last_success_at": self.last_success_at}
+
+    def report(self, payload):
+        if not self.broker.connected.is_set() or self.generation != self.broker.generation:
+            return False
+        try:
+            self.broker.publish("diagnostics", json.dumps(payload, allow_nan=False, separators=(",", ":")), self.generation)
+        except BrokerError:
+            self.diagnostic_errors += 1
+            LOG.warning("MQTT diagnostics publish failed")
+            return False
+        return True
 
     def offline(self, sources):
         if self.sync():
@@ -223,9 +261,10 @@ class MQTTOutput:
     def attempt(self, action, *args):
         try:
             getattr(self, action)(*args)
-        except BrokerError:
+        except BrokerError as exc:
             self.generation = 0
-            LOG.warning("MQTT publish interrupted")
+            self.publish_errors += 1
+            LOG.warning("MQTT publish interrupted (%s): %s", action, exc)
 
 
 def emit_sample(outputs, device, source, values, fetched_at):
@@ -244,6 +283,8 @@ def run(config, stop):
     device = None
     summary_ok = False
     halted = False
+    health = Health()
+    next_report = 0.0
     if broker:
         broker.start()
     try:
@@ -251,20 +292,32 @@ def run(config, stop):
             while not stop.is_set():
                 if mqtt_output:
                     mqtt_output.attempt("sync")
+                now = time.monotonic()
+                if config.diagnostics_interval and now >= next_report:
+                    payload = health.snapshot(client, schedules, discovery, device is not None,
+                                              summary_ok, halted, mqtt_output, database, now)
+                    if mqtt_output:
+                        mqtt_output.report(payload)
+                    LOG.info("Diagnostics: %s", json.dumps(payload, separators=(",", ":")))
+                    next_report = time.monotonic() + config.diagnostics_interval
                 if halted:
                     stop.wait(1)
                     continue
                 if device is None and time.monotonic() >= discovery.due:
+                    started = time.monotonic()
                     try:
                         device = select_inverter(discover(client, config.plant_id), config.inverter_sn)
                         discovery.complete(time.monotonic(), True)
+                        health.record("discovery", started)
                         LOG.info("AEC device selected")
-                    except (AuthenticationError, RateLimitError):
+                    except (AuthenticationError, RateLimitError) as exc:
+                        health.record("discovery", started, exc)
                         halted = True
-                        LOG.error("AEC authentication or rate limit; polling suspended until restart")
+                        LOG.error("AEC polling suspended until restart: %s", safe_error(exc))
                     except AECError as exc:
+                        health.record("discovery", started, exc)
                         discovery.complete(time.monotonic(), False)
-                        LOG.warning("Discovery failed: %s", type(exc).__name__)
+                        LOG.warning("Discovery failed: %s", safe_error(exc))
                 if device is None:
                     stop.wait(1)
                     continue
@@ -273,6 +326,7 @@ def run(config, stop):
                         break
                     if time.monotonic() < schedule.due or (source == "detail" and not summary_ok):
                         continue
+                    started = time.monotonic()
                     try:
                         values = poll_source(client, device, source, config.tz)
                         fetched_at = datetime.now(timezone.utc)
@@ -280,24 +334,28 @@ def run(config, stop):
                         if source == "summary":
                             summary_ok = values.get("online") is True
                             if not summary_ok:
+                                health.record(source, started, offline=True)
                                 if mqtt_output:
                                     mqtt_output.attempt("offline", ("summary", "detail"))
                                 schedule.complete(time.monotonic(), False)
                                 continue
+                        health.record(source, started)
                         emit_sample(outputs, device, source, values, fetched_at)
-                    except (AuthenticationError, RateLimitError):
+                    except (AuthenticationError, RateLimitError) as exc:
+                        health.record(source, started, exc)
                         halted = True
                         summary_ok = False
                         if mqtt_output:
                             mqtt_output.attempt("offline", tuple(schedules))
-                        LOG.error("AEC authentication or rate limit; polling suspended until restart")
+                        LOG.error("AEC polling suspended until restart: %s", safe_error(exc))
                     except AECError as exc:
+                        health.record(source, started, exc)
                         schedule.complete(time.monotonic(), False)
                         if source == "summary":
                             summary_ok = False
                         if mqtt_output:
                             mqtt_output.attempt("offline", ("summary", "detail") if source == "summary" else (source,))
-                        LOG.warning("%s failed: %s", source, type(exc).__name__)
+                        LOG.warning("%s failed: %s; retry in %.0fs", source, safe_error(exc), max(0, schedule.due - time.monotonic()))
                 stop.wait(1)
     finally:
         try:

@@ -97,6 +97,10 @@ class AECClient:
         self._session.headers.update({"Accept": "application/json"})
         self._authenticated = False
         self._closed = False
+        self.request_attempts = 0
+        self.request_retries = 0
+        self.successful_logins = 0
+        self.session_renewals = 0
 
     @classmethod
     def from_env(cls, **kwargs: Any) -> AECClient:
@@ -129,6 +133,9 @@ class AECClient:
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         self._ensure_open()
         for attempt in range(self._max_retries + 1):
+            self.request_attempts += 1
+            if attempt:
+                self.request_retries += 1
             try:
                 response = self._session.request(
                     method, self._base_url + path, timeout=self._timeout,
@@ -136,9 +143,10 @@ class AECClient:
                 )
             except requests.exceptions.SSLError:
                 raise TransportError("TLS verification failed") from None
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
                 if attempt == self._max_retries:
-                    raise TransportError("Network retry budget exhausted") from None
+                    reason = "Timeout" if isinstance(exc, requests.exceptions.Timeout) else "Connection error"
+                    raise TransportError(f"{reason}: network retry budget exhausted") from None
                 self._wait(attempt)
                 continue
             except requests.exceptions.RequestException:
@@ -195,6 +203,7 @@ class AECClient:
                    for c in self._session.cookies):
             raise AuthenticationError("Login did not establish a JSESSIONID cookie")
         self._authenticated = True
+        self.successful_logins += 1
 
     def _read(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         self._ensure_open()
@@ -205,6 +214,7 @@ class AECClient:
         except _LoginRequired:
             self._authenticated = False
             self.login()
+            self.session_renewals += 1
         try:
             return self._request(method, path, **kwargs)
         except _LoginRequired:

@@ -30,6 +30,7 @@ All topics are under MQTT_TOPIC_PREFIX. Each message is retained at QoS 1.
 | summary/state | normalized summary JSON, schema, fetched_at |
 | detail/availability | online/offline (successful detail, valid summary) |
 | detail/state | normalized detail JSON, schema, fetched_at |
+| diagnostics | gateway health JSON, independent schema 1 and reported_at |
 
 Consumers must require both gateway and corresponding source availability,
 and reject stale fetched_at timestamps using their own freshness threshold.
@@ -45,3 +46,42 @@ subscriptions or control commands.
 See deploy/compose.yaml and deploy/gateway.env.example. Copy the example to a private .env beside the Compose file; Dockge can manage it directly. See [PostgreSQL storage](storage.md) for optional storage. The initial published
 image targets linux/amd64. CI builds the image; broker and live deployment
 must still be validated separately.
+
+## Gateway diagnostics (v0.4.1)
+
+AEC_DIAGNOSTICS_INTERVAL defaults to 60 seconds (0 disables periodic reports).
+Reports use the existing MQTT prefix, QoS 1 and retain. The same JSON is
+logged locally, including in database-only mode or when MQTT is disconnected.
+Reporting continues while cloud polling is halted; it issues no extra API
+requests and does not change the polling intervals or API retry policy.
+Reports are periodic rather than real-time; consumers must check reported_at
+freshness and gateway availability. Counters are process-local and reset on
+restart. started_at identifies the reporting process lifetime.
+
+Fields: schema, version, reported_at, started_at, uptime_seconds,
+polling_halted, device_selected. The api object counts HTTP request attempts
+(including login), retry attempts and successful logins/session renewals.
+Discovery, summary and detail have separate success/failure counts,
+consecutive failures, offline polls (a subset of failed polls), last success
+and error timestamps, last error, last and mean duration in milliseconds,
+blocked and next_poll_in_seconds (null while blocked). Durations include
+the complete logical call, including retries and any necessary login.
+Discovery is blocked after device selection. Detail is blocked without a
+successful online summary. Last errors remain visible after recovery;
+consecutive_failures resets on success.
+
+The mqtt object reports enabled, connected, connections, connection_errors,
+published (fully acknowledged state and availability), skipped (broker
+offline), publish_errors (including availability/sync failures),
+diagnostic_errors and last_success_at. The postgresql object reports enabled,
+connected (last known open connection, not an active probe), stored
+(acknowledged inserts including idempotent duplicates), write_errors
+(uncertain or failed writes), skipped (backoff), cleanup_errors,
+last_success_at and retry_in_seconds. A disabled output reports enabled=false.
+No credentials, identifiers, response bodies or arbitrary exception strings
+are included. Network timeout, connection failure, TLS and HTTP status errors
+are distinguished when the client can determine them.
+
+Diagnostic logging and MQTT heartbeat failures do not change source
+availability or trigger API retries. Delivery failures remain best-effort;
+a durable replay queue is not implemented.

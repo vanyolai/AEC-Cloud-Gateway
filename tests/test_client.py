@@ -90,6 +90,10 @@ def test_session_renewal(client, expired):
     assert client.get_plants() == {"result": 0}
     assert mock.call_count == 4
     assert mock.call_args_list[1].args == mock.call_args_list[3].args
+    assert client.request_attempts == 4
+    assert client.successful_logins == 2
+    assert client.session_renewals == 1
+    assert client.request_retries == 0
 
 
 def test_session_renewal_bounded(client):
@@ -104,6 +108,9 @@ def test_retries(client):
     mock = script(client, login_response(), requests.Timeout("secret"), response(status=503), response({"result": 0}))
     assert client.get_plants() == {"result": 0}
     assert mock.call_count == 4
+    assert client.request_attempts == 4
+    assert client.request_retries == 2
+    assert client.successful_logins == 1
 
 
 def test_retry_after(client):

@@ -4,7 +4,7 @@ Unofficial, self-hosted integration for AEC Cloud inverter telemetry. The first
 milestone is a standalone Python client, with no MQTT or Home Assistant dependency.
 This is an independent project, not a Sunpura fork or a vendor-supported SDK.
 
-**Status:** 0.4.0 development baseline. The endpoints were tested manually on
+**Status:** 0.4.1 development baseline. The endpoints were tested manually on
 2026-11-26 against an SP100-12000-48 inverter. This implementation has offline
 unit tests; the client has now been exercised successfully against a live SP100-12000-48 account.
 
@@ -106,3 +106,5 @@ See [gateway documentation](docs/gateway.md) and the [Compose example](deploy/co
 Continuous polling is disabled until explicitly enabled after provider terms review.
 
 See [PostgreSQL storage](docs/storage.md) for optional local history and external or bundled database configuration.
+
+Version 0.4.1 adds a periodic diagnostics heartbeat and safe failure reasons; see [gateway diagnostics](docs/gateway.md#gateway-diagnostics-v041).
