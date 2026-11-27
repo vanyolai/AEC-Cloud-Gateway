@@ -98,8 +98,15 @@ HA discovery adds external config namespace only; disabled by default.
   Baseline commit 709c55d82c90998eeaa2e93cec2b85659b57137d.
   v0.4.1 [CI failure](https://github.com/vanyolai/AEC-Cloud-Gateway/actions/runs/45930516732)
   was followed by green v0.4.2. Do not treat a successful Docker build as CI.
-- v0.5.0 HA implementation: verify current CI and live HA before claiming
-  compatibility. No extra API calls. See docs/home-assistant.md.
+- v0.5.0 baseline commit 609804d6346a357a78369713e795e615ca6c6606:
+  [CI](https://github.com/vanyolai/AEC-Cloud-Gateway/actions/runs/45937284827)
+  and [Docker](https://github.com/vanyolai/AEC-Cloud-Gateway/actions/runs/45937284835)
+  both verified successful. Operator deployed v0.5.0 on 2026-11-27:
+  discovery and PostgreSQL initialization succeeded, summary/detail were
+  stored and published, and all 50 HA configs were acknowledged in about
+  50 seconds. Subsequent summary cycles continued normally. Actual retained
+  delivery through the ACL and HA entity creation/state/availability/removal
+  still require verification. No extra API calls. See docs/home-assistant.md.
 
 ## Next milestones / acceptance gates
 
