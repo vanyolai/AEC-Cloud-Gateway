@@ -104,15 +104,24 @@ HA discovery adds external config namespace only; disabled by default.
   both verified successful. Operator deployed v0.5.0 on 2026-11-27:
   discovery and PostgreSQL initialization succeeded, summary/detail were
   stored and published, and all 50 HA configs were acknowledged in about
-  50 seconds. Subsequent summary cycles continued normally. Actual retained
-  delivery through the ACL and HA entity creation/state/availability/removal
-  still require verification. No extra API calls. See docs/home-assistant.md.
+  50 seconds. Subsequent summary cycles continued normally. On 2026-11-27 the operator
+  configured HA's MQTT integration with a dedicated broker login; the HA
+  device appeared with live summary/detail values, units and unknown battery
+  capacity/remaining energy instead of false zeros. Representative readings:
+  SOC 24%, battery power 14 W discharging, voltage 52 V, inverter 18 C,
+  cumulative grid import 14.98 kWh, load 25.25 kWh. Basic HA integration is
+  verified by operator screenshot; complete entity count, stable IDs on
+  reconnect, availability/expiration, removal and energy statistics remain
+  unverified. No code fix was needed for initial HA discovery. No extra API
+  calls. See docs/home-assistant.md.
 
 ## Next milestones / acceptance gates
 
-1. v0.5.0: test discovery on a real broker/HA; verify ACL, retained configs,
-   all entity IDs stable, state classes, null handling, restart, availability,
-   remove mode and unchanged MyHome/DB behavior. Check diagnostic progress.
+1. v0.5.0: basic live HA discovery and representative states/null handling
+   verified. Remaining acceptance: full entity count, stable IDs, restart,
+   availability/expiration, removal, energy statistics and unchanged MyHome
+   behavior. These can be tested separately; no need to block historical
+   schema investigation on them.
 2. v0.6.0: investigate past-day getDeviceBySn using a bounded one-shot query
    (avoid parallel live pollers; check terms). Compare yesterday/today
    chartMap, channel units, timestamp semantics incl DST, nulls, duplicates,

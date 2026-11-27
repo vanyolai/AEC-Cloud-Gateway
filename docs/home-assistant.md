@@ -71,8 +71,13 @@ home_assistant.complete=true. Verify retained config and state with MQTTX
 or another authorized MQTT subscriber. In HA Settings > Devices & services >
 MQTT, check the device, representative power/SOC/energy sensors, null values,
 availability during gateway stop, stable entity IDs on restart and reconnect.
-The actual HA runtime test is pending; CI tests generated payloads and retry
-logic only.
+Basic live HA validation succeeded on 2026-11-27 after setting up HA's MQTT
+integration with a dedicated broker account. The device and representative
+summary/detail sensors appeared, with units and unknown battery energy values
+preserved. If configs are acknowledged but no device appears, verify that HA
+is authenticated to the same broker and uses the same discovery prefix before
+changing gateway code. Full entity count, reconnect, availability/expiration,
+removal and Energy dashboard behavior remain to be tested.
 
 ## Remove
 

@@ -5,7 +5,9 @@
   retained config, dual availability, expiration and explicit removal mode.
 - Bounded independent discovery retries and diagnostic progress.
 - Developer handover and deployment/test documentation.
-- Existing MQTT and PostgreSQL contracts unchanged. Live HA test pending.
+- Existing MQTT and PostgreSQL contracts unchanged. Basic live HA discovery,
+  representative sensor values and unknown-value handling verified; remaining
+  lifecycle and energy statistics tests pending.
 
 ## 0.4.2 — 2026-11-27
 - Session rejection reason and endpoint, cookie metadata/presence/rotation,
