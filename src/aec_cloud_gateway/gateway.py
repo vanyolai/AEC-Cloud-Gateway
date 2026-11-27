@@ -60,6 +60,7 @@ class Config:
     mqtt_enabled: bool = True
     database: DatabaseConfig | None = field(default=None, repr=False)
     diagnostics_interval: int = 60
+    diagnostics_log_interval: int = 300
 
     @classmethod
     def from_env(cls, env):
@@ -91,7 +92,10 @@ class Config:
                    ZoneInfo(env.get("AEC_TIMEZONE", "UTC")),
                    env.get("AEC_PLANT_ID") or None, env.get("AEC_INVERTER_SN") or None,
                    mqtt_enabled, database,
-                   integer(env, "AEC_DIAGNOSTICS_INTERVAL", 60, 0, 86400))
+                   integer(env, "AEC_DIAGNOSTICS_INTERVAL", 60, 0, 86400),
+                   integer(env, "AEC_DIAGNOSTICS_LOG_INTERVAL",
+                           300 if integer(env, "AEC_DIAGNOSTICS_INTERVAL", 60, 0, 86400) else 0,
+                           0, 86400))
 
 
 class BrokerError(Exception):
@@ -285,6 +289,7 @@ def run(config, stop):
     halted = False
     health = Health()
     next_report = 0.0
+    next_log = 0.0
     if broker:
         broker.start()
     try:
@@ -293,13 +298,17 @@ def run(config, stop):
                 if mqtt_output:
                     mqtt_output.attempt("sync")
                 now = time.monotonic()
-                if config.diagnostics_interval and now >= next_report:
+                mqtt_due = bool(mqtt_output and config.diagnostics_interval and now >= next_report)
+                log_due = bool(config.diagnostics_log_interval and now >= next_log)
+                if mqtt_due or log_due:
                     payload = health.snapshot(client, schedules, discovery, device is not None,
                                               summary_ok, halted, mqtt_output, database, now)
-                    if mqtt_output:
+                    if mqtt_due:
                         mqtt_output.report(payload)
-                    LOG.info("Diagnostics: %s", json.dumps(payload, separators=(",", ":")))
-                    next_report = time.monotonic() + config.diagnostics_interval
+                        next_report = time.monotonic() + config.diagnostics_interval
+                    if log_due:
+                        LOG.info("Diagnostics: %s", json.dumps(payload, separators=(",", ":")))
+                        next_log = time.monotonic() + config.diagnostics_log_interval
                 if halted:
                     stop.wait(1)
                     continue

@@ -36,6 +36,7 @@ def test_poll_recovery():
 def test_report_disabled_outputs_and_halted():
     h = Health()
     client = Mock(request_attempts=4, request_retries=1, successful_logins=1, session_renewals=0)
+    client.session_health.snapshot.return_value = {}
     data = h.snapshot(client, {"summary": Schedule(60), "detail": Schedule(300)},
                       Schedule(300), True, False, True, None, None, h.started + 20)
     assert data["uptime_seconds"] == 20
@@ -91,3 +92,14 @@ def test_diagnostics_interval():
     assert Config.from_env(env | {"AEC_DIAGNOSTICS_INTERVAL": "0"}).diagnostics_interval == 0
     with pytest.raises(ValueError):
         Config.from_env(env | {"AEC_DIAGNOSTICS_INTERVAL": "-1"})
+
+def test_independent_log_interval():
+    env = {"AEC_POLL_ENABLED": "true", "AEC_EMAIL": "fake", "AEC_PASSWORD": "fake",
+           "MQTT_HOST": "broker"}
+    assert Config.from_env(env).diagnostics_log_interval == 300
+    assert Config.from_env(env | {"AEC_DIAGNOSTICS_INTERVAL": "0"}).diagnostics_log_interval == 0
+    cfg = Config.from_env(env | {"AEC_DIAGNOSTICS_INTERVAL": "0",
+                                 "AEC_DIAGNOSTICS_LOG_INTERVAL": "60"})
+    assert cfg.diagnostics_interval == 0 and cfg.diagnostics_log_interval == 60
+    with pytest.raises(ValueError):
+        Config.from_env(env | {"AEC_DIAGNOSTICS_LOG_INTERVAL": "-1"})

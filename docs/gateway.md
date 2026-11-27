@@ -50,8 +50,10 @@ must still be validated separately.
 ## Gateway diagnostics (v0.4.1)
 
 AEC_DIAGNOSTICS_INTERVAL defaults to 60 seconds (0 disables periodic reports).
-Reports use the existing MQTT prefix, QoS 1 and retain. The same JSON is
-logged locally, including in database-only mode or when MQTT is disconnected.
+Reports use the existing MQTT prefix, QoS 1 and retain. Since v0.4.2 the same
+JSON is logged independently using AEC_DIAGNOSTICS_LOG_INTERVAL (default 300s,
+or 0 if AEC_DIAGNOSTICS_INTERVAL=0 and no explicit log interval is set).
+Logging works in database-only mode or when MQTT is disconnected.
 Reporting continues while cloud polling is halted; it issues no extra API
 requests and does not change the polling intervals or API retry policy.
 Reports are periodic rather than real-time; consumers must check reported_at
@@ -85,3 +87,18 @@ are distinguished when the client can determine them.
 Diagnostic logging and MQTT heartbeat failures do not change source
 availability or trigger API retries. Delivery failures remain best-effort;
 a durable replay queue is not implemented.
+
+### Session observations (v0.4.2)
+
+The additive api.session object contains HTTP 401 and application-level
+login-required counters, last successful login, authenticated state, current
+session age, last rejection and last successful renewal (reason, endpoint
+label, HTTP status, age and cookie presence), mean observed age at successful
+renewal, JSESSIONID cookie metadata (root path, explicit domain, secure,
+session-cookie flag, expiry and expired flag), cookie rotations on read
+responses and cookie header presence on prepared read requests. A missing
+prepared request is reported as unknown, not as a missing cookie.
+The mean age measures time since successful login, not a verified server TTL.
+Cookie rotations count changes to nonempty valid cookie sets; no raw values,
+domains, paths, URLs, credentials, IDs or response bodies are logged.
+Session behavior, retries, API polling and database schema are unchanged.

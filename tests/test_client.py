@@ -230,3 +230,49 @@ def test_malformed_result_not_success(client, result):
     script(client, login_response(), response({"result": result}))
     with pytest.raises(APIError):
         client.get_plants()
+
+def test_session_rejection_observations(client):
+    rejected = response(status=401)
+    rejected.request.headers = {"Cookie": "JSESSIONID=secret-cookie"}
+    success = response({"result": 0})
+    success.request.headers = {"Cookie": "JSESSIONID=new-secret"}
+    script(client, login_response(), rejected, login_response(), success)
+    client.get_plants()
+    stats = client.session_health.snapshot(client._session.cookies, client._authenticated)
+    assert stats["http_401_count"] == 1
+    assert stats["api_login_required_count"] == 0
+    assert stats["last_renewal"]["endpoint"] == "get_plants"
+    assert stats["last_renewal"]["reason"] == "http_401"
+    assert stats["last_renewal"]["cookie_sent"] is True
+    assert stats["session_lifetime_avg_seconds"] is not None
+    assert "secret" not in json.dumps(stats)
+    assert stats["authenticated"] is True
+
+
+def test_application_rejection_and_missing_cookie(client):
+    rejected = response({"result": 1, "msg": "Please login"})
+    rejected.request.headers = {}
+    script(client, login_response(), rejected, login_response(), response({"result": 0}))
+    client.get_home_control_sn("private-plant-id")
+    stats = client.session_health.snapshot(client._session.cookies, client._authenticated)
+    assert stats["api_login_required_count"] == 1
+    assert stats["http_401_count"] == 0
+    assert stats["cookie_missing_requests"] == 1
+    assert stats["cookie_header_unknown"] == 1
+    assert stats["last_renewal"]["endpoint"] == "get_home_control_sn"
+    assert stats["last_renewal"]["cookie_sent"] is False
+    assert "private-plant-id" not in json.dumps(stats)
+
+
+def test_cookie_rotation_observed_without_login(client):
+    from aec_cloud_gateway.session_health import SessionHealth
+    client._session.cookies.set("JSESSIONID", "private-before")
+    before = SessionHealth.cookie_values(client._session.cookies)
+    client._session.cookies.set("JSESSIONID", "private-after")
+    result = response({"result": 0})
+    result.request.headers = {"Cookie": "JSESSIONID=private-before"}
+    client.session_health.observe("/energy/getHomeCountData", before, client._session.cookies, result)
+    stats = client.session_health.snapshot(client._session.cookies, True)
+    assert stats["cookie_rotations"] == 1
+    assert stats["last_read_cookie_sent"] is True
+    assert "private" not in json.dumps(stats)

@@ -14,6 +14,8 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
+from .session_health import SessionHealth
+
 from .errors import (
     APIError, AuthenticationError, ProtocolError, RateLimitError,
     SessionExpiredError, TransportError,
@@ -101,6 +103,7 @@ class AECClient:
         self.request_retries = 0
         self.successful_logins = 0
         self.session_renewals = 0
+        self.session_health = SessionHealth()
 
     @classmethod
     def from_env(cls, **kwargs: Any) -> AECClient:
@@ -136,6 +139,7 @@ class AECClient:
             self.request_attempts += 1
             if attempt:
                 self.request_retries += 1
+            before = self.session_health.cookie_values(self._session.cookies)
             try:
                 response = self._session.request(
                     method, self._base_url + path, timeout=self._timeout,
@@ -151,6 +155,7 @@ class AECClient:
                 continue
             except requests.exceptions.RequestException:
                 raise TransportError("HTTP request failed") from None
+            self.session_health.observe(path, before, self._session.cookies, response)
             status = response.status_code
             if status in _RETRY_STATUS:
                 if attempt == self._max_retries:
@@ -159,6 +164,7 @@ class AECClient:
                 self._wait(attempt, response.headers.get("Retry-After"))
                 continue
             if status == 401:
+                self.session_health.reject(path, "http_401", status)
                 raise _LoginRequired()
             if not 200 <= status < 300:
                 raise TransportError(f"Unexpected HTTP status {status}")
@@ -172,12 +178,14 @@ class AECClient:
             if "result" in payload and (type(result) is not int or result != 0):
                 msg = payload.get("msg")
                 if isinstance(msg, str) and any(s in msg.casefold() for s in _LOGIN_REQUIRED):
+                    self.session_health.reject(path, "api_login_required", status)
                     raise _LoginRequired()
                 raise APIError("AEC API returned a non-success result")
             # Also recognize an explicit login-required message without a result.
             if "result" not in payload:
                 msg = payload.get("msg")
                 if isinstance(msg, str) and any(s in msg.casefold() for s in _LOGIN_REQUIRED):
+                    self.session_health.reject(path, "api_login_required", status)
                     raise _LoginRequired()
             return payload
         raise AssertionError("Unreachable retry loop")
@@ -204,6 +212,7 @@ class AECClient:
             raise AuthenticationError("Login did not establish a JSESSIONID cookie")
         self._authenticated = True
         self.successful_logins += 1
+        self.session_health.login()
 
     def _read(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         self._ensure_open()
@@ -215,6 +224,7 @@ class AECClient:
             self._authenticated = False
             self.login()
             self.session_renewals += 1
+            self.session_health.renewed()
         try:
             return self._request(method, path, **kwargs)
         except _LoginRequired:
