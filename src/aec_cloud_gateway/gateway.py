@@ -20,6 +20,7 @@ from .errors import AECError, AuthenticationError, RateLimitError
 from .telemetry import normalize_summary, normalize_details
 from .storage import DatabaseConfig, PostgresStorage
 from .health import Health, safe_error
+from .ha_discovery import DiscoveryConfig, DiscoveryPublisher
 
 LOG = logging.getLogger("aec-gateway")
 
@@ -61,6 +62,7 @@ class Config:
     database: DatabaseConfig | None = field(default=None, repr=False)
     diagnostics_interval: int = 60
     diagnostics_log_interval: int = 300
+    ha_discovery: DiscoveryConfig | None = None
 
     @classmethod
     def from_env(cls, env):
@@ -95,7 +97,8 @@ class Config:
                    integer(env, "AEC_DIAGNOSTICS_INTERVAL", 60, 0, 86400),
                    integer(env, "AEC_DIAGNOSTICS_LOG_INTERVAL",
                            300 if integer(env, "AEC_DIAGNOSTICS_INTERVAL", 60, 0, 86400) else 0,
-                           0, 86400))
+                           0, 86400),
+                   DiscoveryConfig.from_env(env, mqtt_enabled, prefix))
 
 
 class BrokerError(Exception):
@@ -146,9 +149,12 @@ class Broker:
         self.client.loop_start()
 
     def publish(self, suffix, payload, generation):
+        self.publish_topic(self.topic(suffix), payload, generation)
+
+    def publish_topic(self, topic, payload, generation):
         if not self.connected.is_set() or self.generation != generation:
             raise BrokerError("MQTT disconnected")
-        info = self.client.publish(self.topic(suffix), payload, qos=1, retain=True)
+        info = self.client.publish(topic, payload, qos=1, retain=True)
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
             raise BrokerError("MQTT publish rejected")
         try:
@@ -290,6 +296,8 @@ def run(config, stop):
     health = Health()
     next_report = 0.0
     next_log = 0.0
+    ha = DiscoveryPublisher(config.ha_discovery, config.prefix,
+                            config.summary_interval, config.detail_interval) if config.ha_discovery else None
     if broker:
         broker.start()
     try:
@@ -297,12 +305,15 @@ def run(config, stop):
             while not stop.is_set():
                 if mqtt_output:
                     mqtt_output.attempt("sync")
+                    if ha and mqtt_output.generation and broker.connected.is_set():
+                        ha.step(broker, mqtt_output.generation, time.monotonic(), BrokerError)
                 now = time.monotonic()
                 mqtt_due = bool(mqtt_output and config.diagnostics_interval and now >= next_report)
                 log_due = bool(config.diagnostics_log_interval and now >= next_log)
                 if mqtt_due or log_due:
                     payload = health.snapshot(client, schedules, discovery, device is not None,
                                               summary_ok, halted, mqtt_output, database, now)
+                    payload["home_assistant"] = ha.health() if ha else {"enabled": False}
                     if mqtt_due:
                         mqtt_output.report(payload)
                         next_report = time.monotonic() + config.diagnostics_interval

@@ -69,19 +69,23 @@ subsets of observed structures, not exact sanitized captures.
 
 ## Roadmap
 
-1. Standalone client and offline CI (this milestone); live smoke test and exact
-   sanitized fixtures before declaring API compatibility.
-2. Normalized telemetry model after validation of fields, units and signs.
-3. Docker service and MQTT publication to an existing broker. Configurable
-   summary polling (60 seconds) and detail polling (300 seconds).
-4. Optional PostgreSQL snapshot storage and independent MQTT output.
-5. Home Assistant MQTT Discovery, stable identities and availability handling.
-6. Historical backfill and REST export. MyHome consumes MQTT via a separate gateway.
+See [development handover](docs/development.md) for the verified baseline,
+architecture, decisions, known limitations, deployment and next tasks.
+See [CHANGELOG](CHANGELOG.md) for release history.
 
-No control features are planned in the initial milestones. Do not enable
-unattended polling until the vendor's applicable terms and rate limits have
-been reviewed. There is no guarantee that the undocumented API will remain
-compatible.
+- v0.1.x: standalone client and private capture workflow.
+- v0.2.0: normalized telemetry and device discovery.
+- v0.3.0: Docker MQTT gateway.
+- v0.4.x: PostgreSQL, operational and session diagnostics.
+- v0.5.0: optional [Home Assistant MQTT Discovery](docs/home-assistant.md).
+- v0.6.0 (planned): historical chart validation and backfill.
+- v0.7.0 (planned): read-only REST API and optional dashboard.
+- v0.8.0 (planned): durable output spool and reliability.
+- v1.0.0 (planned): documented stable release.
+
+MyHome consumes MQTT through a separate gateway. No inverter control is
+implemented. Provider terms and rate limits remain unverified; continuous
+polling requires explicit opt-in.
 
 ## Development
 

@@ -41,4 +41,4 @@ One-shot live snapshot (prompts for credentials unless environment set):
 python -m aec_cloud_gateway.snapshot
 ```
 Only the observed model is validated; unknown models may have absent or
-different fields. No daemon, control features, or broker integration yet.
+different fields. The daemon and broker integration are documented in [gateway.md](gateway.md). No inverter control features.

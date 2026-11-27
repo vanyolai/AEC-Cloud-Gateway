@@ -16,8 +16,9 @@ Before enabling continuous polling, check provider terms and rate limits;
 these remain unverified. AEC_POLL_ENABLED defaults to false. The provisional
 minimum intervals are 60 seconds for summary and 300 for detail. AEC_TIMEZONE
 controls the date used for detail requests; it does not resolve historical
-timestamp semantics. No historical backfill, Home Assistant Discovery or
-MyHome integration is included yet.
+timestamp semantics. Optional Home Assistant Discovery is available since v0.5.0; see
+[Home Assistant](home-assistant.md). No historical backfill or native MyHome
+integration is included. MyHome uses a separate MQTT consumer.
 
 ## MQTT schema 1
 
@@ -102,3 +103,5 @@ The mean age measures time since successful login, not a verified server TTL.
 Cookie rotations count changes to nonempty valid cookie sets; no raw values,
 domains, paths, URLs, credentials, IDs or response bodies are logged.
 Session behavior, retries, API polling and database schema are unchanged.
+
+Discovery configs are published outside the telemetry prefix when explicitly enabled. The diagnostics payload includes a home_assistant progress object. See [setup and removal](home-assistant.md).

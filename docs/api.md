@@ -30,7 +30,7 @@ not configuration changes.
 - `deviceDetail` can be null. `deviceDetailInfoVo` can contain placeholder
   zeros (SOC 0 while the actual SOC was 24). Do not treat these as authoritative
   without corroboration. JSON null, numeric zero and missing values differ.
-- The battery power sign convention, historical backfill for earlier days,
+- Discharge mode -1 is corroborated; charging and grid sign conventions, historical backfill for earlier days,
   timezone interpretation, exact chart schema and alarm-code endpoint are
   not yet verified. Do not invent normalized mappings for these.
 
@@ -49,5 +49,16 @@ not a recommended password hashing algorithm. Never reuse the digest elsewhere.
 
 Before running continuous polling, check the vendor's applicable terms,
 API access restrictions and rate limits. The preliminary polling intervals
-of 60 and 300 seconds are configuration defaults for the future gateway,
+of 60 and 300 seconds are configuration defaults for the gateway,
 not documented provider limits.
+
+## Operational session observations (2026-11-27)
+
+Live v0.4.2 logs show application-level login-required replies with HTTP 200,
+JSESSIONID present on the outgoing prepared request and a changed cookie set.
+Three observed ages at rejection: 60.84, 182.01 and 58.18 seconds. Both summary
+and detail were affected; zero HTTP 401 and zero missing-cookie observations.
+The phone-off test did not eliminate renewals. A server-side routing/session
+store issue is plausible, not established. Do not claim a fixed server TTL or
+attempt to circumvent authentication. The bounded re-login/replay works in the
+observed cases; retain the conservative request policy.
